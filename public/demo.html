@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Drift Demo Panel</title>
+    <style>
+        body { font-family: sans-serif; background: #fafafa; margin: 0; padding: 20px; }
+        h1 { color: #333; }
+        .controls { margin-bottom: 20px; }
+        .task-card { background: white; border: 1px solid #ddd; padding: 15px; margin-bottom: 15px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .task-title { font-weight: bold; font-size: 18px; margin-bottom: 5px; }
+        .task-state { margin-bottom: 15px; font-size: 14px; color: #555; }
+        .task-actions { display: flex; gap: 10px; align-items: center; }
+        button { padding: 6px 12px; cursor: pointer; background: #eee; border: 1px solid #ccc; border-radius: 4px; }
+        button.primary { background: #4285f4; color: white; border-color: #3367d6; }
+        button:hover { filter: brightness(0.95); }
+        .severity-converging { color: green; font-weight: bold; }
+        .severity-mild_risk { color: orange; font-weight: bold; }
+        .severity-real_risk { color: darkorange; font-weight: bold; }
+        .severity-will_miss { color: red; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>Drift Demo Panel</h1>
+    <div class="controls">
+        <button class="primary" onclick="resetDemo()">Reset Demo (Reload Seed Data)</button>
+    </div>
+
+    <div id="tasks-container">Loading...</div>
+
+    <script>
+        async function loadTasks() {
+            const res = await fetch('/api/demo/state');
+            const data = await res.json();
+            const container = document.getElementById('tasks-container');
+            container.innerHTML = '';
+
+            data.tasks.forEach(task => {
+                const checkins = task.checkins || [];
+                const latestProgress = checkins.length > 0 ? checkins[checkins.length - 1].progress_pct : 0;
+                
+                const card = document.createElement('div');
+                card.className = 'task-card';
+                card.innerHTML = `
+                    <div class="task-title">${task.title} (ID: ${task.task_id})</div>
+                    <div class="task-state">
+                        <div>Progress: ${latestProgress}%</div>
+                        <div>Estimated Effort: ${task.estimated_effort_hours}h | Pace Factor: ${task.historical_pace_factor}</div>
+                        <div>State: <span class="severity-${task.computed_state.severity}">${task.computed_state.severity}</span> 
+                        (Confidence: ${task.computed_state.confidence_pct}%)</div>
+                        <div>Required Pace: ${task.computed_state.required_pace.toFixed(2)}% /hr | Actual Pace: ${task.computed_state.actual_pace ? task.computed_state.actual_pace.toFixed(2) : 'N/A'}% /hr</div>
+                        <div style="margin-top:5px; padding:5px; background:#f0f8ff; border-left:3px solid #4285f4; white-space: pre-wrap; word-wrap: break-word;">
+                            <strong>Latest Agent Decision:</strong><br/>
+                            ${task.latest_decision ? (typeof task.latest_decision === 'object' ? JSON.stringify(task.latest_decision, null, 2) : task.latest_decision) : "None"}
+                        </div>
+                        ${task.execution_error ? `<div style="margin-top:5px; padding:5px; background:#ffebee; color:#c62828;"><strong>Error:</strong> ${task.execution_error}</div>` : ''}
+                        
+                        ${task.ui_state ? `
+                            <div style="margin-top:10px; padding:10px; border-radius:4px; ${
+                                task.ui_state.type === 'silent' ? 'background:#e8f5e9; border:1px solid #c8e6c9;' :
+                                task.ui_state.type === 'nudge' ? 'background:#fff3e0; border:1px solid #ffe0b2;' :
+                                task.ui_state.type === 'renegotiation' ? 'background:#e3f2fd; border:1px solid #bbdefb;' :
+                                'background:#ffebee; border:1px solid #ffcdd2; border-left:4px solid #c62828;'
+                            }">
+                                <strong>[UI State: ${task.ui_state.type.toUpperCase()}]</strong><br/>
+                                ${task.ui_state.message}
+                                ${task.ui_state.type === 'nudge' && task.ui_state.link !== '#' ? `<br/><a href="${task.ui_state.link}" target="_blank">Resource Link</a>` : ''}
+                                ${task.ui_state.type === 'renegotiation' ? `<br/><button class="primary" style="margin-top:5px;" onclick="confirmAction('${task.task_id}')">Accept Swap with ${task.ui_state.trade_task_id}</button>` : ''}
+                            </div>
+                        ` : ''}
+                    </div>
+                    <div class="task-actions">
+                        <input type="number" id="progress-${task.task_id}" value="${Math.min(100, latestProgress + 5)}" style="width: 60px;" />
+                        <button onclick="simulateCheckin('${task.task_id}')">Simulate Check-in (+1 hour)</button>
+                        
+                        <select id="severity-${task.task_id}">
+                            <option value="converging">Converging</option>
+                            <option value="mild_risk">Mild Risk</option>
+                            <option value="real_risk">Real Risk</option>
+                            <option value="will_miss">Will Miss</option>
+                        </select>
+                        <button onclick="forceSeverity('${task.task_id}')">Force Severity</button>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        async function resetDemo() {
+            await fetch('/api/demo/reset', { method: 'POST' });
+            loadTasks();
+        }
+
+        async function simulateCheckin(taskId) {
+            const progress = document.getElementById(`progress-${taskId}`).value;
+            await fetch('/api/demo/checkin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ task_id: taskId, progress_pct: parseFloat(progress) })
+            });
+            loadTasks();
+        }
+
+        async function forceSeverity(taskId) {
+            const severity = document.getElementById(`severity-${taskId}`).value;
+            await fetch('/api/demo/force', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ task_id: taskId, severity })
+            });
+            loadTasks();
+        }
+
+        async function confirmAction(taskId) {
+            await fetch('/api/demo/action/confirm', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ task_id: taskId })
+            });
+            loadTasks();
+        }
+
+        loadTasks();
+    </script>
+</body>
+</html>
