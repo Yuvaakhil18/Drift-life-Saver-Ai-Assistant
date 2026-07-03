@@ -242,7 +242,7 @@ app.post('/api/demo/force', (req, res) => {
 });
 
 // Catch-all route to serve the React index.html for unknown routes
-app.get('*', (req, res, next) => {
+app.get(/(.*)/, (req, res, next) => {
   if (req.path.startsWith('/api')) return next();
   res.sendFile(path.join(__dirname, 'frontend/dist/index.html'));
 });
